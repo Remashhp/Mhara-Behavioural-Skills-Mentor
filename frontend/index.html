@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Behavioural Skills Mentor</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap"
+    rel="stylesheet" />
+
+  <!-- App Styles -->
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+
+<body>
+
+  <div class="grid-bg"></div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+     HOME PAGE
+     ═══════════════════════════════════════════════════════ -->
+  <div id="page-home" class="page active">
+
+    <header class="app-header">
+
+      <div class="logo">
+
+        <img src="assets/logo.png" class="logo-img">
+
+        <div>
+          <div class="logo-title">Mhara</div>
+
+          <div class="logo-sub">
+            Behavioural Skills Mentor
+          </div>
+        </div>
+
+      </div>
+
+    </header>
+
+
+    <main class="hero">
+      <div class="hero-eyebrow">Evidence-Based Skills Training</div>
+      <h1>
+        <span class="line1">Real-Time Skills</span>
+        <span class="line2">Assessment</span>
+      </h1>
+      <p class="hero-desc">Select a training domain to explore available skills and assessments</p>
+
+      <div class="skill-selector-wrap">
+        <div class="skill-selector-label">//select a training domain</div>
+        <div class="skill-grid" id="skillGrid"></div>
+
+        <div id="sourceChipWrap" style="display:none;">
+          <a id="sourceChip" class="source-chip" href="#" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            <span id="sourceChipLabel">Reference</span>
+          </a>
+        </div>
+      </div>
+    </main>
+  </div>
+
+
+
+
+  <!-- DOMAIN PAGE -->
+
+  <div id="page-domain" class="page">
+
+    <header class="app-header">
+
+
+
+    </header>
+
+    <main class="hero">
+
+
+      <h1>
+        <span class="line1" id="domainHeading">
+          Healthcare Skills
+        </span>
+
+        <span class="line2">
+          Assessment
+        </span>
+      </h1>
+
+
+      <div class="hero-eyebrow">
+        Training Skills
+      </div>
+
+      <p class="hero-desc">
+        Select a practical skill to begin assessment.
+      </p>
+
+      <div class="skill-selector-wrap">
+
+        <div class="skill-grid" id="domainSkillsGrid"></div>
+        <button class="cta-btn" id="domainStartBtn" onclick="startPractice()">
+          <svg viewBox="0 0 24 24">
+            <polygon points="5,3 19,12 5,21" />
+          </svg>
+
+          Start Assessment
+        </button>
+
+
+      </div>
+
+    </main>
+
+  </div>
+  <!-- ═══════════════════════════════════════════════════════════
+     PRACTICE PAGE
+     ═══════════════════════════════════════════════════════ -->
+  <div id="page-practice" class="page">
+    <header class="app-header">
+      <div class="header-left"></div>
+      <div class="logo">
+        <span class="logo-title">Behavioural Skills Mentor</span>
+      </div>
+
+      <div class="header-badge">
+        <span class="live-dot"></span>
+        <span id="session-status">Ready</span>
+      </div>
+    </header>
+    <div class="practice-grid" style="flex:1;">
+
+      <!-- Camera Panel -->
+      <div class="cam-panel">
+        <div class="cam-inner">
+          <video id="videoEl" autoplay muted playsinline style="display:none;"></video>
+          <canvas id="poseCanvas" style="display:none;"></canvas>
+
+          <!-- State: Idle -->
+          <div class="cam-state" id="stateIdle">
+            <div class="idle-body">
+              <div class="cam-icon-ring">
+                <div class="ring-pulse"></div>
+                <div class="ring-pulse2"></div>
+                <svg viewBox="0 0 24 24">
+                  <rect x="2" y="6" width="20" height="14" rx="2.5" />
+                  <circle cx="12" cy="13" r="3.2" />
+                  <path d="M9 3h6l1.5 3H7.5z" />
+                </svg>
+              </div>
+              <div class="idle-title">Camera Access Required</div>
+              <div class="idle-skill-badge" id="skillBadgePractice">—</div>
+              <button class="btn-enable-cam" onclick="requestCamera()">
+                <svg viewBox="0 0 24 24">
+                  <path d="M23 7l-7 5 7 5V7z" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" />
+                </svg>
+                Enable Camera
+              </button>
+              <div class="idle-note">// No video recorded or transmitted — all analysis runs locally.</div>
+            </div>
+          </div>
+
+          <!-- State: Requesting -->
+          <div class="cam-state" id="stateRequesting">
+            <div class="req-body">
+              <div class="req-icon">
+                <div class="req-spin"></div>
+                <svg viewBox="0 0 24 24">
+                  <rect x="2" y="6" width="20" height="14" rx="2.5" />
+                  <circle cx="12" cy="13" r="3.2" />
+                  <path d="M9 3h6l1.5 3H7.5z" />
+                </svg>
+              </div>
+              <div class="req-title">Requesting Camera…</div>
+              <div class="req-desc">Click <strong>Allow</strong> in the browser prompt.</div>
+              <div class="req-dots">
+                <div class="req-dot"></div>
+                <div class="req-dot"></div>
+                <div class="req-dot"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- State: Denied -->
+          <div class="cam-state" id="stateDenied">
+            <div class="denied-body">
+              <div class="denied-icon">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                </svg>
+              </div>
+              <div class="denied-title">Camera Blocked</div>
+              <div class="denied-desc">Click the lock icon → Allow → Reload.</div>
+              <button class="btn-reload" onclick="location.reload()">↺ Reload</button>
+            </div>
+          </div>
+
+          <!-- Live Overlay -->
+          <div id="liveOverlay" style="display:none;position:absolute;inset:0;pointer-events:none;">
+            <div class="cam-overlay-tl">
+              <div class="rec-badge live"><span class="live-dot" style="background:var(--bad)"></span> LIVE</div>
+              <div class="rec-badge">POSE: <span id="poseStatusTxt"
+                  style="color:var(--warn);margin-left:4px;">DETECTING</span></div>
+            </div>
+            <div class="cam-overlay-tr">
+              <div class="timer-badge" id="timerDisp">0:30</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rhythm Section -->
+        <div class="rhythm-section" id="rhythmSection" style="display:none;">
+          <div class="section-label">Movement Rhythm</div>
+          <div class="rhythm-wave" id="rhythmWave"></div>
+        </div>
+
+        <!-- Camera Footer -->
+        <div class="cam-footer">
+          <div class="pose-status">
+            <div class="status-dot" id="poseDot"></div>
+            <span id="poseLabel">Pose not detected</span>
+          </div>
+          <button class="stop-btn" onclick="stopSession()">&#9632; End Session</button>
+        </div>
+      </div>
+
+      <!-- Side Panel -->
+      <div class="side-panel">
+        <!-- Primary Metric -->
+        <div class="metric-card">
+          <div class="mc-header">
+            <span id="pmLabel">Rate</span>
+            <span class="mc-chip" id="pmTarget">—</span>
+          </div>
+          <div class="mc-big">
+            <span id="pmVal" class="color-neutral">—</span>
+            <span class="mc-unit" id="pmUnit"></span>
+          </div>
+          <div class="mc-sub" id="pmStatus">Begin to measure</div>
+          <div class="mc-range">
+            <div class="mc-range-fill" id="pmBar" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- Action Count -->
+        <div class="metric-card">
+          <div class="mc-header">
+            Actions <span style="font-size:10px;color:var(--text-dim);font-family:var(--fm);">this session</span>
+          </div>
+          <div class="mc-big"><span id="compCount" class="color-neutral">0</span></div>
+          <div class="mc-sub" id="compSub">No actions detected</div>
+        </div>
+
+        <!-- Live Criteria Scores -->
+        <div class="scores-mini">
+          <div class="mc-header" style="margin-bottom:12px;">Live Scores</div>
+          <div id="liveCriteriaScores">
+            <div style="font-family:var(--fm);font-size:11px;color:var(--text-dim);">—</div>
+          </div>
+        </div>
+
+        <!-- Live Feedback -->
+        <div class="feedback-card">
+          <div class="mc-header" style="margin-bottom:12px;">Live Feedback</div>
+          <div class="feedback-list" id="feedbackList">
+            <div class="fb-item fb-warn">
+              <span class="fb-icon">⚡</span>
+              <span>Enable camera to begin.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+     RESULTS PAGE
+     ═══════════════════════════════════════════════════════ -->
+  <div id="page-results" class="page">
+    <header class="app-header" style="position:relative;">
+      <div class="logo">
+        <span class="logo-title">Behavioural Skills Mentor</span>
+      </div>
+      <div class="header-badge">Session Complete</div>
+    </header>
+
+    <div class="results-container" style="padding-top:32px;">
+      <div class="results-header">
+        <div class="results-eyebrow" id="resultEyebrow">Session Report</div>
+        <div class="results-title" id="result-title">Session Complete</div>
+      </div>
+
+      <!-- Score Circle -->
+      <div class="score-circle-wrap">
+        <div class="score-circle">
+          <svg viewBox="0 0 160 160">
+            <circle cx="80" cy="80" r="70" fill="none" stroke="#30363d" stroke-width="10" />
+            <circle cx="80" cy="80" r="70" fill="none" id="score-arc" stroke="var(--accent)" stroke-width="10"
+              stroke-dasharray="439.8" stroke-dashoffset="439.8" stroke-linecap="round"
+              style="transition:stroke-dashoffset 1.5s cubic-bezier(0.34,1.56,0.64,1)" />
+          </svg>
+          <div class="score-circle-num" id="final-score-num">0</div>
+          <div class="score-circle-label">/ 100</div>
+        </div>
+      </div>
+
+      <div class="score-grade" id="score-grade">—</div>
+      <div class="score-grade-desc" id="score-grade-desc">Calculating...</div>
+
+      <!-- Breakdown Cards -->
+      <div class="breakdown-grid" id="breakdown-grid"></div>
+
+      <!-- Source Reference -->
+      <div class="source-ref" id="resultSourceRef" style="display:none;">
+        <div class="source-ref-icon">
+          <svg viewBox="0 0 24 24">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </div>
+        <div class="source-ref-text">
+          <div class="source-ref-label">Assessment criteria sourced from</div>
+          <a class="source-ref-link" id="resultSourceLink" href="#" target="_blank" rel="noopener">—</a>
+        </div>
+      </div>
+
+      <!-- Improvement Tips -->
+      <div class="tips-section">
+        <div class="tips-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"
+            stroke-linecap="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          Improvement Tips
+        </div>
+        <div id="tips-list"></div>
+      </div>
+
+      <!-- Actions -->
+      <div class="results-actions">
+        <button class="btn-retry" onclick="retrySession()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"
+            stroke-linecap="round">
+            <polyline points="1 4 1 10 7 10" />
+            <path d="M3.51 15a9 9 0 1 0 .49-4.86" />
+          </svg>
+          Try Again
+        </button>
+        <button class="btn-home" onclick="goHome()">Change Skill</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div class="notif" id="notif"></div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+     SCRIPTS — load order matters
+     1. Data / scoring (no DOM dependency)
+     2. Session logic
+     3. Camera / pose
+     4. App controller (calls buildSkillGrid on load)
+     5. MediaPipe CDN libraries
+     ═══════════════════════════════════════════════════════ -->
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"
+    crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"
+    crossorigin="anonymous"></script>
+
+  <script src="js/config.js"></script>
+  <script src="js/criteria-db.js"></script>
+  <script src="js/score.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/app.js"></script>
+
+
+
+</body>
+
+</html>

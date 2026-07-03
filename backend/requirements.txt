@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+beautifulsoup4
+google-genai
+supabase
+python-dotenv
+trafilatura
