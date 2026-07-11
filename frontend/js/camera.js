@@ -1,10 +1,21 @@
 /*
-  SkillMentor - Optimized Pose + Hands Tracking Pipeline
-  Total Tracking Points:
-  - Pose: 33
-  - Hands: 42
-  = 75 Landmarks
+  SkillMentor - Tracking Pipeline (MediaPipe Tasks Vision — Next Generation)
+  - Pose is always loaded; Hands is loaded only for skills that require it.
+  - GPU delegate with automatic fallback to CPU if WebGL fails.
+  - Proper resource cleanup prevents WebGL context accumulation during retries.
 */
+
+const MP_TASKS = {
+    version: '0.10.14',
+    get moduleUrl() {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${this.version}/vision_bundle.mjs`;
+    },
+    get wasmUrl() {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${this.version}/wasm`;
+    },
+    poseModel: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
+    handModel: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
+};
 
 class SkillCameraManager {
     constructor() {
@@ -12,16 +23,29 @@ class SkillCameraManager {
         this.canvasElement = null;
         this.canvasCtx = null;
 
-        this.pose = null;
-        this.hands = null;
-        this.camera = null;
+        // Tasks Vision landmarkers
+        this.poseLandmarker = null;
+        this.handLandmarker = null;
+        this.drawingUtils = null;
+
+        // Library class references (used for connection constants)
+        this._PoseLandmarker = null;
+        this._HandLandmarker = null;
+        // Direct browser camera access (without camera_utils)
+
+        this._stream = null;
+        this._frameHandle = null;
+        this._usingRVFC = false;
+        this._running = false;
+        this._lastVideoTime = -1;
+        this._gpuFrameFailures = 0;
 
         this.latestPose = null;
         this.latestHands = null;
 
         this.isPipelineReady = false;
-        this.getSessionState = null;
     }
+
     _startCountdown(seconds) {
         return new Promise(resolve => {
             const camInner = document.querySelector('.cam-inner');
@@ -66,7 +90,10 @@ class SkillCameraManager {
         });
     }
 
-    async initializePipeline(videoId, canvasId) {
+    /**
+     * @param {boolean} needsHands —  Passed from app.js based on the selected skill dimensions
+     */
+    async initializePipeline(videoId, canvasId, needsHands = false) {
 
         this.videoElement = document.getElementById(videoId);
         this.canvasElement = document.getElementById(canvasId);
@@ -78,87 +105,208 @@ class SkillCameraManager {
 
         this.canvasCtx = this.canvasElement.getContext("2d");
 
-        // =========================
-        // Pose Initialization
-        // =========================
-
-        this.pose = new Pose({
-            locateFile: (file) =>
-                `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-        });
-
-        this.pose.setOptions({
-            modelComplexity: 1,
-            smoothLandmarks: true,
-            enableSegmentation: false,
-            minDetectionConfidence: 0.65,
-            minTrackingConfidence: 0.65
-        });
-
-        this.pose.onResults((results) => {
-            this.latestPose = results;
-        });
-        await this.pose.initialize();
-
-        // =========================
-        // Hands Initialization
-        // =========================
-
-        this.hands = new Hands({
-            locateFile: (file) =>
-                `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-        });
-
-        this.hands.setOptions({
-            maxNumHands: 2,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.65,
-            minTrackingConfidence: 0.65
-        });
-
-        this.hands.onResults((results) => {
-            this.latestHands = results;
-        });
-        await this.hands.initialize();
-
-        // =========================
-        // Camera
-        // =========================
-
         try {
 
-            this.camera = new Camera(this.videoElement, {
+            // 1) Dynamically load the Tasks Vision library (ES Module)
+            const vision = await import(MP_TASKS.moduleUrl);
+            const { FilesetResolver, PoseLandmarker, HandLandmarker, DrawingUtils } = vision;
+            this._PoseLandmarker = PoseLandmarker;
+            this._HandLandmarker = HandLandmarker;
 
-                onFrame: async () => {
+            const fileset = await FilesetResolver.forVisionTasks(MP_TASKS.wasmUrl);
+            // 2) Pose — Always loaded. Try GPU first, then automatically fall back to CPU if WebGL fails.
 
-                    // إرسال الفريم للنموذجين معًا
-                    await Promise.all([
-                        this.pose.send({ image: this.videoElement }),
-                        this.hands.send({ image: this.videoElement })
-                    ]);
-                    // رسم النتائج
-                    this.renderFrame();
-                },
+            this.poseLandmarker = await this._createWithFallback(
+                PoseLandmarker, fileset, this._buildModelOptions('pose', 'GPU')
+            );
 
-                width: 640,
-                height: 480
+            // 3) Hands — Load only if the selected skill requires it.
+
+            if (needsHands) {
+                this.handLandmarker = await this._createWithFallback(
+                    HandLandmarker, fileset, this._buildModelOptions('hands', 'GPU')
+                );
+            }
+
+            this.drawingUtils = new DrawingUtils(this.canvasCtx);
+            // 4) Access the camera directly using getUserMedia.
+
+            this._stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 640 }, height: { ideal: 480 } },
+                audio: false
             });
+            this.videoElement.srcObject = this._stream;
 
-            await this.camera.start();
+            await new Promise((resolve) => {
+                this.videoElement.onloadedmetadata = () => resolve();
+            });
+            await this.videoElement.play();
+            // Set canvas dimensions based on the actual video size (fixes the gray screen issue).
+
+            this.canvasElement.width = this.videoElement.videoWidth || 640;
+            this.canvasElement.height = this.videoElement.videoHeight || 480;
+
             await this._startCountdown(3);
+            // 5) Start the processing loop.
+
+            this._running = true;
+            this._lastVideoTime = -1;
+            this._scheduleNextFrame();
 
             this.isPipelineReady = true;
-
-            console.log("Pose + Hands pipeline ready.");
+            console.log(`✓ Tasks Vision pipeline ready — Pose${needsHands ? ' + Hands' : ' only'}.`);
 
         } catch (error) {
-            console.error("Camera access failed:", error);
+            console.error("Pipeline initialization failed:", error);
+            await this.destroy();
             throw error;
         }
     }
 
+    // ── Model options builder — single source for all four
+    // creation sites (init GPU, init hands, CPU rebuild ×2).
+    // Confidence 0.65: empirical calibration — high enough to
+    // reject phantom detections, low enough for webcam lighting.
+    _buildModelOptions(kind, delegate) {
+        const CONFIDENCE = 0.65;
+        const base = {
+            runningMode: 'VIDEO'
+        };
+        if (kind === 'pose') {
+            return {
+                ...base,
+                baseOptions: { modelAssetPath: MP_TASKS.poseModel, delegate },
+                numPoses: 1,
+                minPoseDetectionConfidence: CONFIDENCE,
+                minPosePresenceConfidence: CONFIDENCE,
+                minTrackingConfidence: CONFIDENCE
+            };
+        }
+        return {
+            ...base,
+            baseOptions: { modelAssetPath: MP_TASKS.handModel, delegate },
+            numHands: 2,
+            minHandDetectionConfidence: CONFIDENCE,
+            minHandPresenceConfidence: CONFIDENCE,
+            minTrackingConfidence: CONFIDENCE
+        };
+    }
+
+    // ── Create a Landmarker with Automatic GPU → CPU Fallback ──
+    async _createWithFallback(TaskClass, fileset, options) {
+        try {
+            return await TaskClass.createFromOptions(fileset, options);
+        } catch (gpuError) {
+            console.warn(`⚠ GPU delegate فشل (${gpuError.message}) — التبديل إلى CPU...`);
+            options.baseOptions.delegate = 'CPU';
+            return await TaskClass.createFromOptions(fileset, options);
+        }
+    }
+
+    // ── Schedule the Next Frame ──
+    _scheduleNextFrame() {
+        if (!this._running) return;
+
+        const loop = () => this._processVideoFrame();
+
+        if (typeof this.videoElement.requestVideoFrameCallback === 'function') {
+            this._usingRVFC = true;
+            this._frameHandle = this.videoElement.requestVideoFrameCallback(loop);
+        } else {
+            this._usingRVFC = false;
+            this._frameHandle = requestAnimationFrame(loop);
+        }
+    }
+
+    // ── Process a Single Video Frame ──
+    _processVideoFrame() {
+        if (!this._running || !this.poseLandmarker) return;
+
+        const video = this.videoElement;
+        // Do not process the same frame twice.
+
+        if (video.readyState >= 2 && video.currentTime !== this._lastVideoTime) {
+            this._lastVideoTime = video.currentTime;
+            const timestamp = performance.now();
+
+            try {
+                this.latestPose = this.poseLandmarker.detectForVideo(video, timestamp);
+
+                if (this.handLandmarker) {
+                    this.latestHands = this.handLandmarker.detectForVideo(video, timestamp);
+                }
+            } catch (e) {
+                console.warn('⚠ detectForVideo فشل لهذا الفريم:', e.message);
+
+                // GPU delegate may initialize successfully but fail during execution
+                // on some devices (e.g., activeTexture errors). After 10 consecutive
+                // frame failures, rebuild the models using the CPU.
+
+
+                this._gpuFrameFailures++;
+                if (this._gpuFrameFailures === 10 && !this._cpuRetried) {
+                    this._cpuRetried = true;
+                    console.warn('⚠ GPU غير صالح على هذا الجهاز — إعادة البناء على CPU...');
+                    this._rebuildOnCpu();
+                    return; // // ── Rebuild Models on CPU After GPU Runtime Failure ──
+
+                }
+            }
+
+            this.renderFrame();
+        }
+
+        this._scheduleNextFrame();
+    }
+
+    // Rebuild using the CPU.
+
+    async _rebuildOnCpu() {
+        this._running = false;
+
+        try {
+            const vision = await import(MP_TASKS.moduleUrl);
+            const { FilesetResolver, PoseLandmarker, HandLandmarker } = vision;
+            const fileset = await FilesetResolver.forVisionTasks(MP_TASKS.wasmUrl);
+
+            const hadHands = !!this.handLandmarker;
+            if (this.poseLandmarker) { try { this.poseLandmarker.close(); } catch (e) { } }
+            if (this.handLandmarker) { try { this.handLandmarker.close(); } catch (e) { } }
+
+            this.poseLandmarker = await PoseLandmarker.createFromOptions(
+                fileset, this._buildModelOptions('pose', 'CPU')
+            );
+
+            if (hadHands) {
+                this.handLandmarker = await HandLandmarker.createFromOptions(
+                    fileset, this._buildModelOptions('hands', 'CPU')
+                );
+            }
+
+            console.log('✓ النماذج أعيد بناؤها على CPU — استئناف المعالجة');
+
+            this._running = true;
+            this._lastVideoTime = -1;
+            this._scheduleNextFrame();
+
+        } catch (err) {
+            console.error('❌ فشل إعادة البناء على CPU:', err);
+        }
+    }
+
     renderFrame() {
-        // إعادة تعيين حالة الـ Pose في كل إطار
+        // Tasks Vision output format:
+        //
+        // Pose:  { landmarks: [ [33 landmarks] ] }   ← First detected person only
+        // Hands: { landmarks: [ [21], [21] ] }       ← Array of detected hands
+        //
+        // Each landmark uses the same {x, y, z} structure and indexing,
+        // so session.js remains fully compatible.
+        const poseLm = this.latestPose?.landmarks?.[0] ?? null;
+        const handsLm = (this.latestHands?.landmarks?.length)
+            ? this.latestHands.landmarks
+            : null;
+
         const poseStatusTxt = document.getElementById('poseStatusTxt');
         const poseDot = document.getElementById('poseDot');
         const poseLabel = document.getElementById('poseLabel');
@@ -166,93 +314,42 @@ class SkillCameraManager {
         if (poseDot) { poseDot.style.background = 'var(--warn)'; }
         if (poseLabel) { poseLabel.textContent = 'Pose not detected'; }
 
-        // تنظيف الكانفس
-        this.canvasCtx.clearRect(
-            0,
-            0,
-            this.canvasElement.width,
-            this.canvasElement.height
-        );
+        // Clear the canvas and draw the camera frame.
 
-        // رسم صورة الكاميرا
-        this.canvasCtx.drawImage(
-            this.videoElement,
-            0,
-            0,
-            this.canvasElement.width,
-            this.canvasElement.height
-        );
+        this.canvasCtx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
+        this.canvasCtx.drawImage(this.videoElement, 0, 0, this.canvasElement.width, this.canvasElement.height);
 
-        // =========================
-        // Draw Pose
-        // =========================
-
-        if (this.latestPose?.poseLandmarks) {
-
-            drawConnectors(
-                this.canvasCtx,
-                this.latestPose.poseLandmarks,
-                POSE_CONNECTIONS,
-                {
-                    color: "#00FF00",
-                    lineWidth: 4
-                }
+        // ── Draw Pose ──
+        if (poseLm) {
+            this.drawingUtils.drawConnectors(
+                poseLm,
+                this._PoseLandmarker.POSE_CONNECTIONS,
+                { color: "#00FF00", lineWidth: 4 }
+            );
+            this.drawingUtils.drawLandmarks(
+                poseLm,
+                { color: "#FF0000", lineWidth: 2, radius: 4 }
             );
 
-            drawLandmarks(
-                this.canvasCtx,
-                this.latestPose.poseLandmarks,
-                {
-                    color: "#FF0000",
-                    lineWidth: 2,
-                    radius: 4
-                }
-            );
 
-            // إرسال البيانات للجلسة
-            // إرسال البيانات للجلسة
-            this.onFrame?.(
-                this.latestPose.poseLandmarks,
-                this.latestHands?.multiHandLandmarks ?? null
-            );
-
-            // تحديث حالة الـ Pose
-            const poseStatusTxt = document.getElementById('poseStatusTxt');
-            const poseDot = document.getElementById('poseDot');
-            const poseLabel = document.getElementById('poseLabel');
+            this.onFrame?.(poseLm, handsLm);
 
             if (poseStatusTxt) { poseStatusTxt.textContent = 'DETECTED'; poseStatusTxt.style.color = 'var(--good)'; }
             if (poseDot) { poseDot.style.background = 'var(--good)'; }
             if (poseLabel) { poseLabel.textContent = 'Pose detected'; }
-
         }
 
-        // =========================
-        // Draw Hands
-        // =========================
-
-        if (this.latestHands?.multiHandLandmarks) {
-
-            for (const landmarks of this.latestHands.multiHandLandmarks) {
-
-                drawConnectors(
-                    this.canvasCtx,
+        // ── Draw Hands ──
+        if (handsLm) {
+            for (const landmarks of handsLm) {
+                this.drawingUtils.drawConnectors(
                     landmarks,
-                    HAND_CONNECTIONS,
-                    {
-                        color: "#06b6d4",
-                        lineWidth: 3
-                    }
+                    this._HandLandmarker.HAND_CONNECTIONS,
+                    { color: "#06b6d4", lineWidth: 3 }
                 );
-
-                drawLandmarks(
-                    this.canvasCtx,
+                this.drawingUtils.drawLandmarks(
                     landmarks,
-                    {
-                        color: "#FFFFFF",
-                        lineWidth: 1,
-                        radius: 2
-                    }
+                    { color: "#FFFFFF", lineWidth: 1, radius: 2 }
                 );
             }
         }
@@ -264,15 +361,17 @@ class SkillCameraManager {
 
     }
     // ─────────────────────────────────────────────────────────
-    // Ghost Overlay — يظهر قبل بداية التقييم
-    // يرسم وضعية مثالية للمهارة المختارة
+    // Ghost Overlay
+    // Displays the ideal pose before the assessment begins.
+    // Visualizes the target posture for the selected skill.
     // ─────────────────────────────────────────────────────────
     _drawGhost(skillId) {
         const ctx = this.canvasCtx;
         const W = this.canvasElement.width || 640;
         const H = this.canvasElement.height || 480;
 
-        // تأثير النبض
+        // Pulse animation.
+
         const pulse = 0.75 + 0.2 * Math.sin(Date.now() / 900);
 
         const color = `rgba(78, 163, 151, ${pulse})`;
@@ -289,7 +388,7 @@ class SkillCameraManager {
         switch (skillId) {
 
             // ══════════════════════════════════════════════════
-            // CPR — واقف فوق المريض، ذراعين مستقيمين
+            // CPR 
             // ══════════════════════════════════════════════════
             case 'cpr': {
                 const pts = {
@@ -300,22 +399,20 @@ class SkillCameraManager {
                 };
                 const p = k => [pts[k][0] * W, pts[k][1] * H];
 
-                // خطوط الهيكل
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 3.5;
 
-                // كتفين
                 this._line(ctx, p('lSho'), p('rSho'));
 
-                // ذراع يسار مستقيم
+                // Straight left arm
                 this._line(ctx, p('lSho'), p('lElb'));
                 this._line(ctx, p('lElb'), p('lWri'));
 
-                // ذراع يمين مستقيم
+                // Straight right arm
                 this._line(ctx, p('rSho'), p('rElb'));
                 this._line(ctx, p('rElb'), p('rWri'));
 
-                // يدين فوق بعض — دائرة في المنتصف
+                // Hands overlapping — circle in the center
                 const mx = (p('lWri')[0] + p('rWri')[0]) / 2;
                 const my = (p('lWri')[1] + p('rWri')[1]) / 2;
 
@@ -327,7 +424,7 @@ class SkillCameraManager {
                 ctx.strokeStyle = colorWrist;
                 ctx.stroke();
 
-                // نقاط المفاصل
+                // Joint points
                 ctx.setLineDash([]);
                 ctx.shadowBlur = 0;
                 const joints = ['lSho', 'rSho', 'lElb', 'rElb'];
@@ -335,13 +432,39 @@ class SkillCameraManager {
                 this._dot(ctx, p('lWri'), 7, colorWrist, colorFill);
                 this._dot(ctx, p('rWri'), 7, colorWrist, colorFill);
 
-                // نص توجيهي
-                this._label(ctx, W / 2, H * 0.16, 'Align hands over sternum', pulse);
+               // Instructional text
+                // Show live arrow from actual wrists to target center
+const sessionState = this.getSessionState?.();
+if (sessionState?.wristX !== undefined) {
+    const actualX = sessionState.wristX * W;
+    const actualY = (sessionState.wristY || 0.64) * H;
+    const targetX = mx;
+    const targetY = my;
+    const dx = targetX - actualX;
+    const dy = targetY - actualY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > W * 0.05) {
+        // Draw arrow from actual to target
+        ctx.strokeStyle = `rgba(255, 100, 100, ${pulse})`;
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(actualX, actualY);
+        ctx.lineTo(targetX, targetY);
+        ctx.stroke();
+        this._label(ctx, W / 2, H * 0.16, 'Move hands to center ↓', pulse);
+    } else {
+        this._label(ctx, W / 2, H * 0.16, '✓ Hands centered!', pulse);
+    }
+} else {
+    this._label(ctx, W / 2, H * 0.16, 'Align hands over sternum', pulse);
+}
                 break;
             }
 
             // ══════════════════════════════════════════════════
-            // Heimlich — واقف خلف المريض، يدين حول البطن
+            // Heimlich 
             // ══════════════════════════════════════════════════
             case 'heimlich': {
                 const pts = {
@@ -355,18 +478,18 @@ class SkillCameraManager {
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 3.5;
 
-                // كتفين
+
                 this._line(ctx, p('lSho'), p('rSho'));
 
-                // ذراع يسار — مثني للداخل
+
                 this._line(ctx, p('lSho'), p('lElb'));
                 this._line(ctx, p('lElb'), p('lWri'));
 
-                // ذراع يمين — مثني للداخل
+
                 this._line(ctx, p('rSho'), p('rElb'));
                 this._line(ctx, p('rElb'), p('rWri'));
 
-                // منطقة البطن — هدف الدفع
+
                 const mx = (p('lWri')[0] + p('rWri')[0]) / 2;
                 const my = (p('lWri')[1] + p('rWri')[1]) / 2;
 
@@ -378,13 +501,13 @@ class SkillCameraManager {
                 ctx.strokeStyle = colorWrist;
                 ctx.stroke();
 
-                // سهم للأعلى والداخل
+
                 ctx.setLineDash([]);
                 ctx.strokeStyle = colorWrist;
                 ctx.lineWidth = 2.5;
                 this._arrow(ctx, mx, my + H * 0.06, mx, my - H * 0.04);
 
-                // نقاط
+
                 ctx.shadowBlur = 0;
                 ['lSho', 'rSho', 'lElb', 'rElb'].forEach(k =>
                     this._dot(ctx, p(k), 5, color, colorFill));
@@ -396,9 +519,9 @@ class SkillCameraManager {
             }
 
             // ══════════════════════════════════════════════════
-            // Surgical Scrub — يدين مرفوعتين فوق الكوعين
-            // ══════════════════════════════════════════════════
-            case 'surgical_scrub': {
+            // Hand Hygiene
+           // ══════════════════════════════════════════════════
+            case 'hand_hygiene': {
                 const pts = {
                     lSho: [0.34, 0.32], rSho: [0.66, 0.32],
                     lElb: [0.30, 0.52], rElb: [0.70, 0.52],
@@ -409,18 +532,18 @@ class SkillCameraManager {
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 3.5;
 
-                // كتفين
+
                 this._line(ctx, p('lSho'), p('rSho'));
 
-                // ذراع يسار — كوع منحني، يد مرفوعة فوق الكوع
+
                 this._line(ctx, p('lSho'), p('lElb'));
                 this._line(ctx, p('lElb'), p('lWri'));
 
-                // ذراع يمين
+
                 this._line(ctx, p('rSho'), p('rElb'));
                 this._line(ctx, p('rElb'), p('rWri'));
 
-                // خط مرجعي — مستوى الكوعين
+
                 ctx.setLineDash([4, 4]);
                 ctx.strokeStyle = `rgba(248, 81, 73, ${pulse * 0.6})`;
                 ctx.lineWidth = 1.5;
@@ -429,14 +552,14 @@ class SkillCameraManager {
                     [p('rElb')[0] + W * 0.08, p('rElb')[1]]
                 );
 
-                // نص "Elbow level"
+
                 ctx.setLineDash([]);
                 ctx.font = `bold 11px 'DM Mono', monospace`;
                 ctx.fillStyle = `rgba(248, 81, 73, ${pulse})`;
                 ctx.textAlign = 'left';
                 ctx.fillText('← Elbow level (hands must be above)', p('lElb')[0] - W * 0.07, p('lElb')[1] - 6);
 
-                // دوائر اليدين — تشير للحركة الدائرية
+
                 [p('lWri'), p('rWri')].forEach(pt => {
                     ctx.setLineDash([4, 3]);
                     ctx.strokeStyle = colorWrist;
@@ -445,14 +568,14 @@ class SkillCameraManager {
                     ctx.arc(pt[0], pt[1], W * 0.04, 0, Math.PI * 1.5);
                     ctx.stroke();
 
-                    // سهم دوران
+
                     this._arrow(ctx,
                         pt[0] + W * 0.04, pt[1],
                         pt[0] + W * 0.04, pt[1] - H * 0.02
                     );
                 });
 
-                // نقاط
+
                 ctx.setLineDash([]);
                 ctx.shadowBlur = 0;
                 ['lSho', 'rSho', 'lElb', 'rElb'].forEach(k =>
@@ -465,7 +588,7 @@ class SkillCameraManager {
             }
 
             // ══════════════════════════════════════════════════
-            // Safe Lifting — ركبتين منحنيتين، ظهر مستقيم
+            // Safe Lifting 
             // ══════════════════════════════════════════════════
             case 'safe_lifting': {
                 const pts = {
@@ -481,30 +604,25 @@ class SkillCameraManager {
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 3.5;
 
-                // جذع مستقيم
                 const spineTop = [(p('lSho')[0] + p('rSho')[0]) / 2, (p('lSho')[1] + p('rSho')[1]) / 2];
                 const spineBot = [(p('lHip')[0] + p('rHip')[0]) / 2, (p('lHip')[1] + p('rHip')[1]) / 2];
                 ctx.setLineDash([]);
                 ctx.strokeStyle = color;
                 this._line(ctx, spineTop, spineBot);
 
-                // كتفين وأوراك
                 this._line(ctx, p('lSho'), p('rSho'));
                 this._line(ctx, p('lHip'), p('rHip'));
 
-                // ذراعين
                 this._line(ctx, p('lSho'), p('lElb'));
                 this._line(ctx, p('lElb'), p('lWri'));
                 this._line(ctx, p('rSho'), p('rElb'));
                 this._line(ctx, p('rElb'), p('rWri'));
 
-                // أرجل منحنية
                 this._line(ctx, p('lHip'), p('lKne'));
                 this._line(ctx, p('lKne'), p('lAnk'));
                 this._line(ctx, p('rHip'), p('rKne'));
                 this._line(ctx, p('rKne'), p('rAnk'));
 
-                // حمولة قريبة من الجسم
                 const loadX = (p('lWri')[0] + p('rWri')[0]) / 2;
                 const loadY = (p('lWri')[1] + p('rWri')[1]) / 2;
                 ctx.setLineDash([5, 4]);
@@ -516,7 +634,6 @@ class SkillCameraManager {
                 ctx.fill();
                 ctx.stroke();
 
-                // نقاط
                 ctx.setLineDash([]);
                 ctx.shadowBlur = 0;
                 ['lSho', 'rSho', 'lElb', 'rElb', 'lHip', 'rHip', 'lKne', 'rKne'].forEach(k =>
@@ -536,8 +653,8 @@ class SkillCameraManager {
 
         ctx.restore();
     }
+    // ── Drawing Helpers ─────────────────────────────────────
 
-    // ── مساعدات الرسم ─────────────────────────────────────
     _line(ctx, a, b) {
         ctx.beginPath();
         ctx.moveTo(a[0], a[1]);
@@ -578,19 +695,51 @@ class SkillCameraManager {
         ctx.font = `bold 13px 'DM Sans', sans-serif`;
         ctx.fillStyle = `rgba(217, 249, 157, ${pulse})`;
         ctx.textAlign = 'center';
-        ctx.fillText(text, x, y);
+
+        // The canvas is mirrored via CSS (selfie view) which flips text.
+        // Pre-flip the text horizontally around its anchor so it reads
+        // correctly after the CSS mirror is applied.
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(-1, 1);
+        ctx.fillText(text, 0, 0);
+        ctx.restore();
     }
 
     async destroy() {
-        if (this.camera) { try { this.camera.stop(); } catch (e) { } }
-        if (this.pose) { try { await this.pose.close(); } catch (e) { } }
-        if (this.hands) { try { await this.hands.close(); } catch (e) { } }
-        this.pose = null;
-        this.hands = null;
-        this.camera = null;
+        this._running = false;
+        if (this._frameHandle !== null) {
+            try {
+                if (this._usingRVFC && this.videoElement?.cancelVideoFrameCallback) {
+                    this.videoElement.cancelVideoFrameCallback(this._frameHandle);
+                } else {
+                    cancelAnimationFrame(this._frameHandle);
+                }
+            } catch (e) { }
+            this._frameHandle = null;
+        }
+
+        if (this._stream) {
+            try { this._stream.getTracks().forEach(t => t.stop()); } catch (e) { }
+            this._stream = null;
+        }
+        if (this.videoElement) {
+            try { this.videoElement.srcObject = null; } catch (e) { }
+        }
+
+        if (this.poseLandmarker) { try { this.poseLandmarker.close(); } catch (e) { } }
+        if (this.handLandmarker) { try { this.handLandmarker.close(); } catch (e) { } }
+        this.poseLandmarker = null;
+        this.handLandmarker = null;
+        this.drawingUtils = null;
+
+        this.latestPose = null;
+        this.latestHands = null;
+        this._lastVideoTime = -1;
+        this._gpuFrameFailures = 0;
+        this._cpuRetried = false;
         this.isPipelineReady = false;
-        this.getSessionState = null;
-        console.log('✓ Pipeline destroyed');
+        console.log('✓ Pipeline destroyed — all resources released');
     }
 
 }

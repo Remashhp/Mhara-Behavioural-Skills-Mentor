@@ -12,7 +12,7 @@ from fastapi import Header
 import trafilatura
 
 # =========================================================================
-# 1. إعدادات
+# 1. Configuration
 # =========================================================================
 load_dotenv()
 
@@ -30,9 +30,9 @@ app = FastAPI(title="BSM Protocol Engine", version="5.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://localhost:5500",      # فرونت إند محلي عبر VS Code Live Server
-    "http://127.0.0.1:5500",      # نفس الشي — عنوان بديل للـ localhost
-    # "https://your-app.vercel.app" # أضف دومين موقعك هنا لما ترفعه على الإنترنت
+    "http://localhost:5500",      # VS Code Live Server
+    "http://127.0.0.1:5500",      # localhost
+    "ttps://mhara-behavioural-skills-mentor.netlify.app"# Domain
 ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -40,8 +40,9 @@ app.add_middleware(
 )
 
 # =========================================================================
-# 2. القيم الصالحة — يجب أن تتطابق مع session.js و camera.js
+# 2. Valid Values — Must Match session.js and camera.js
 # =========================================================================
+
 VALID_SIGNALS = {
     # Pose (12)
     "wrist_center_x",
@@ -66,7 +67,7 @@ VALID_SIGNALS = {
     "thumb_position"
 }
 
-# نطاقات منطقية — لرفض القيم المستحيلة من Gemini
+# Logical Ranges — Reject Implausible Gemini Values
 SIGNAL_SANITY = {
     "wrist_center_x":          (0.0,  1.0),
     "wrist_center_y":          (0.0,  1.0),
@@ -74,22 +75,22 @@ SIGNAL_SANITY = {
     "elbow_angle":             (60,   180),
     "body_lean":               (0,    60),
     "shoulder_level":          (0.0,  0.5),
-    "hand_height":             (0.0,  1.0),
+    "hand_height":             (0.0,  0.80),
     "wrist_to_navel_distance": (0.0,  1.0),
     "shoulder_hip_angle":      (90,   180),
     "hip_knee_ankle_angle":    (60,   180),
     "wrist_to_body_center":    (0.0,  1.0),
     "knee_angle":              (60,   180),
-    "finger_spread":           (0.0,  1.0),
-    "interdigital_coverage":   (0.0,  1.0),
-    "palm_to_palm_contact":    (0.0,  1.0),
-    "wrist_rotation":          (0,    360),
-    "thumb_coverage":          (0.0,  1.0),
-    "fist_formation":          (0.0,  1.0),
-    "thumb_position":          (0.0,  1.0)
+    "finger_spread":           (0.0,  0.30),
+    "interdigital_coverage":   (0.0,  0.25),
+    "palm_to_palm_contact":    (0.0,  0.60),
+    "wrist_rotation":          (0,    180),
+    "thumb_coverage":          (0.0,  0.40),
+    "fist_formation":          (0.0,  0.30),
+    "thumb_position":          (0.0,  0.30),
 }
 
-# وصف كل signal — يُبنى تلقائياً في الـ prompt
+# Signal Descriptions — Automatically Included in the Prompt
 SIGNAL_DESCRIPTIONS = {
     "wrist_center_x":          "horizontal hand position (0.0–1.0, center=0.5)",
     "wrist_center_y":          "vertical hand position (0.0–1.0, use amplitude for depth)",
@@ -97,23 +98,21 @@ SIGNAL_DESCRIPTIONS = {
     "elbow_angle":             "elbow bend in degrees (90° = perpendicular)",
     "body_lean":               "torso lean in degrees (10–20° = upright)",
     "shoulder_level":          "shoulder height difference (0.0 = level)",
-    "hand_height":             "hands height vs elbows (0.45 = above elbows)",
-    "wrist_to_navel_distance": "wrist distance from navel (0.0–1.0)",
+"hand_height":             "SIGNED elbow-minus-wrist height, normalized units. POSITIVE = hands above elbows (typical 0.05-0.40), negative = hands below elbows",    "wrist_to_navel_distance": "wrist distance from navel (0.0–1.0)",
     "shoulder_hip_angle":      "shoulder to hip angle in degrees (180° = upright)",
     "hip_knee_ankle_angle":    "hip to knee to ankle angle in degrees (180° = straight leg)",
     "wrist_to_body_center":    "wrist distance from body center (0.0–1.0)",
     "knee_angle":              "knee bend angle in degrees (90° = full squat)",
-    "finger_spread":           "finger separation distance (0.0–1.0)",
-    "interdigital_coverage":   "coverage between fingers (0.0–1.0)",
-    "palm_to_palm_contact":    "palm contact proximity (0.0–1.0)",
-    "wrist_rotation":          "wrist rotation in degrees (0–360°)",
-    "thumb_coverage":          "thumb coverage area (0.0–1.0)",
-    "fist_formation":          "fist formation quality (0.0–1.0)",
-    "thumb_position":          "thumb tip position (0.0–1.0)"
+   "finger_spread":           "avg distance between adjacent fingertips of ONE hand, normalized units. Realistic values 0.02-0.15. Larger = fingers more spread",
+    "interdigital_coverage":   "avg distance between finger base knuckles of ONE hand, normalized units. Realistic values 0.02-0.12. Larger = hand more open",
+    "palm_to_palm_contact":    "DISTANCE between the two wrists, normalized units. SMALLER = closer contact. Touching hands = 0.00-0.12. Do NOT treat as a 0-1 quality score",
+    "wrist_rotation":          "instantaneous hand tilt angle in degrees, range 0-180 only",
+    "thumb_coverage":          "distance thumb-tip to pinky-tip of ONE hand, normalized units. Realistic 0.05-0.25",
+    "fist_formation":          "avg fingertip-to-knuckle distance, normalized units. SMALLER = tighter fist. Closed fist = 0.02-0.06, open hand = 0.10-0.20",
+    "thumb_position":          "distance thumb-tip to index-tip, normalized units. Realistic 0.01-0.15"
 }
 
 def build_signal_rule() -> str:
-    """يبني RULE 1 تلقائياً من VALID_SIGNALS — لا تعديل يدوي مطلوب"""
     lines = [f"RULE 1 — pose_signal MUST be EXACTLY one of these {len(VALID_SIGNALS)} values:"]
     for signal in sorted(VALID_SIGNALS):
         desc = SIGNAL_DESCRIPTIONS.get(signal, "")
@@ -121,62 +120,91 @@ def build_signal_rule() -> str:
     return "\n".join(lines)
 
 # =========================================================================
-# 3. كتالوج المهارات
+# 3. Skills Catalog
 # =========================================================================
 STATIC_PROTOCOLS = {
     "cpr": {
+        "name": "CPR / Chest Compressions",
+        "domain": "medical",
         "url":   "https://cpr.heart.org/en/resuscitation-science/cpr-and-ecc-guidelines",
         "emoji": "🫀",
         "tag":   "Basic Life Support",
        "measurement_hint": (
-    # عمق الضغط
+  
+    # Compression depth
     "Use wrist_center_y to measure compression depth via amplitude detection. "
     "The perfect_max represents the minimum required wrist movement amplitude "
     "that corresponds to AHA guideline of minimum 2 inches (5cm) compression depth. "
 
-    # معدل الضغط
-    "Use elbow_angle for compression rate state machine. "
-    "Set perfect_min and perfect_max to represent the DOWN phase "
-    "where elbows bend during active compression. "
+    # Arm straightness
+    "Use elbow_angle as a POSTURE criterion: arms must stay straight "
+    "with elbows locked throughout compressions (per CPR guidelines). "
+    "Set perfect_min and perfect_max to the acceptable straight-arm "
+    "range in degrees (typically ~160-180). "
 
-    # موضع اليد
+    # Hand position
     "Use wrist_center_x for hand centering on sternum. "
     "Set perfect_min and perfect_max to represent the center of the chest "
     "based on AHA guideline: hands at center of sternum. "
 
-    # استقامة الذراع
-    "Use arm_angle for arm straightness during compressions. "
-    "Set perfect_min and perfect_max to represent fully extended straight arms "
-    "based on AHA guideline: locked elbows for effective force transfer. "
+   "IMPORTANT: You MUST include ALL 4 dimensions — missing any one is an error. "
+"Include them in this exact order: "
+"wrist_center_y, elbow_angle, wrist_center_x, palm_to_palm_contact. "
+"wrist_center_y is MANDATORY — it is the ONLY way to detect compression depth and rhythm. "
+"Without wrist_center_y the system cannot count compressions or measure depth. "
+"palm_to_palm_contact detects hand stacking — SMALLER value = hands stacked correctly. "
+"Set palm_to_palm_contact perfect_max to the maximum wrist distance for correct stacking."
+),  
 
-    "IMPORTANT: Always include all 4 dimensions in this exact order: "
-    "wrist_center_y, elbow_angle, wrist_center_x, arm_angle."
-)
     },
     "heimlich": {
+        "name": "Heimlich Maneuver",
+        "domain": "medical",
         "url":   "https://my.clevelandclinic.org/health/treatments/21675-heimlich-maneuver",
         "emoji": "🤲",
         "tag":   "Emergency Response",
         "measurement_hint": (
-            "Use wrist_center_x inward movement to detect abdominal thrust direction. "
-            "Use shoulder_hip_angle to verify rescuer is positioned behind the patient. "
-            "Use elbow_angle to verify correct arm bend during thrust. "
-            "Use body_lean to verify forward positioning."
+            "Use wrist_center_y as the FIRST dimension to detect thrust motion "
+            "via amplitude: perfect_max represents the minimum wrist movement "
+            "amplitude for an effective inward-upward thrust (a value around "
+            "0.05-0.08 in normalized units). perfect_min can be a small value "
+            "below it. This drives thrust counting and rhythm. "
+            "Use wrist_center_x for hands centered on the patient midline "
+            "(0.45-0.55). "
+            "Use elbow_angle for correct arm wrap around the abdomen (80-110). "
+            "Use shoulder_hip_angle for upright rescuer stance behind patient. "
+            "For primary_metric: thrust rate per minute is the measurable "
+            "indicator — a deliberate thrust roughly every 1-2 seconds gives "
+            "target_min around 30 and target_max around 60 thrusts/min, "
+            "unit 'TPM'. "
+            "Do NOT use body_lean — forward lean is invisible from this "
+            "camera setup. "
+            "In improvement_tips, the FIRST tip must state: 'This assessment "
+            "evaluates rescuer positioning and thrust motion only — actual "
+            "hand placement on a patient requires a training manikin or partner.' "
         )
     },
-    "surgical_scrub": {
-    "url": "https://www.ncbi.nlm.nih.gov/books/NBK144013/",
+    "hand_hygiene": {
+        "name": "Hand Hygiene (WHO Technique)",
+        "domain": "medical",
+        "url": "https://www.cdc.gov/clean-hands/about/index.html",
         "emoji": "🧼",
         "tag":   "Aseptic Technique",
         "measurement_hint": (
-            "Use finger_spread to verify fingers are separated for coverage. "
-            "Use wrist_rotation to verify rotational scrubbing motion. "
-            "Use palm_to_palm_contact to verify bilateral hand contact. "
-            "Use interdigital_coverage to verify between-finger cleaning. "
-            "Use hand_height to verify hands remain above elbows."
+            "IMPORTANT: all hand signals are RAW normalized distances — use the "
+            "realistic ranges stated in each signal description, NOT 0-1 quality scores. "
+            "Use palm_to_palm_contact for bilateral contact: touching hands means a SMALL "
+            "distance, so set perfect_min near 0.0 and perfect_max around 0.10-0.15. "
+            "Use interdigital_coverage (realistic 0.02-0.12) for between-finger cleaning. "
+            "Use finger_spread (realistic 0.02-0.15) for finger separation. "
+            "Use wrist_rotation (0-180 degrees, wide range like 40-170) for scrubbing motion. "
+            "Use hand_height for hands-above-elbows: positive = hands above elbows; "
+            "set perfect_min around 0.02 and perfect_max around 0.50."
         )
     },
     "safe_lifting": {
+        "name": "Safe Manual Lifting",
+        "domain": "industrial",
         "url":   "https://www.osha.gov/etools/electrical-contractors/materials-handling/heavy",
         "emoji": "🏋️",
         "tag":   "Industrial Safety",
@@ -191,7 +219,7 @@ STATIC_PROTOCOLS = {
 }
 
 # =========================================================================
-# 4. بناء الـ prompt
+# 4. prompt
 # =========================================================================
 def build_prompt(text: str, skill_id: str, source_url: str) -> str:
     meta = STATIC_PROTOCOLS[skill_id]
@@ -243,8 +271,12 @@ RULE 4 — Feedback (max 8 words each):
 RULE 5 — Output ONLY valid JSON. No markdown, no explanation, no extra text.
 
 RULE 6 — Session Duration:
-  Set session_duration_seconds between 30 and 120 seconds
-  based on skill complexity.
+  Set session_duration_seconds based on the official source text.
+  If the source text specifies a duration or cycle time, use it.
+  If not, use clinical reasoning based on how long one complete 
+  correct repetition of this skill realistically takes.
+  Range must be between 10 and 120 seconds.
+  Never default to 30 unless clinically justified.
   
   RULE 7 — Dimension Weight:
   Assign weight 1-3 to each dimension:
@@ -290,8 +322,9 @@ RULE 6 — Session Duration:
 """
 
 # =========================================================================
-# 5. إدارة قاعدة البيانات
+# 5. Database Management
 # =========================================================================
+
 def load_database() -> dict:
     global _db_cache, _db_cache_valid
     if _db_cache_valid:
@@ -317,8 +350,9 @@ def save_to_database(skill_id: str, skill_config: dict):
         print(f"❌ فشل حفظ المهارة: {e}")
 
 # =========================================================================
-# 6. الكشط
+# 6. Web Scraping
 # =========================================================================
+
 async def scrape(url: str) -> str:
     headers = {
         "User-Agent": (
@@ -334,7 +368,7 @@ async def scrape(url: str) -> str:
     except httpx.RequestError as e:
         raise Exception(f"فشل الاتصال: {e}")
 
-    # محاولة trafilatura أولاً — يسحب النص الطبي الفعلي فقط
+    # Try trafilatura first — extracts the actual medical text only
     extracted = trafilatura.extract(r.text, include_tables=False, no_fallback=False)
     if extracted and len(extracted) > 500:
         return extracted[:15000]
@@ -344,16 +378,21 @@ async def scrape(url: str) -> str:
     for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
         tag.decompose()
     return soup.get_text(separator=" ", strip=True)[:15000]
+
 # =========================================================================
-# 7. استخراج البيانات بـ Gemini
+# 7. Gemini Data Extraction
 # =========================================================================
+
 def extract_with_gemini(text: str, skill_id: str, source_url: str) -> dict:
     prompt = build_prompt(text, skill_id, source_url)
     last_error = None
     for attempt in range(1, 4):
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                #model="gemini-3.5-flash",
+               # model="gemini-2.0-flash",
+               model="gemini-2.5-flash-lite",
+
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -369,7 +408,7 @@ def extract_with_gemini(text: str, skill_id: str, source_url: str) -> dict:
     raise Exception(f"فشل Gemini بعد 3 محاولات — {last_error}")
 
 # =========================================================================
-# 8. التحقق من البيانات وبناء الكائن النهائي
+# 8. Data Validation and Final Object Construction
 # =========================================================================
 def validate_and_build(raw: dict, skill_id: str) -> dict:
     meta = STATIC_PROTOCOLS[skill_id]
@@ -382,8 +421,15 @@ def validate_and_build(raw: dict, skill_id: str) -> dict:
         raise ValueError("primary_metric يفتقد target_min أو target_max")
     if pm["target_min"] >= pm["target_max"]:
         raise ValueError(f"target_min ({pm['target_min']}) >= target_max ({pm['target_max']})")
-
-    # تصفية الـ dimensions
+    
+    #Check session duration — aligns with RULE 6: No silent default
+    duration = raw.get("session_duration_seconds")
+    if duration is None:
+        raise ValueError("session_duration_seconds missing from extraction")
+    if not (10 <= duration <= 120):
+        raise ValueError(f"session_duration_seconds out of allowed range (10-120): {duration}")
+    
+    # Filter dimensions
     valid_dims = []
     seen_signals = set()
     for i, dim in enumerate(raw.get("dimensions", [])):
@@ -433,7 +479,7 @@ def validate_and_build(raw: dict, skill_id: str) -> dict:
             "label": raw.get("name", skill_id),
             "url":   meta["url"]
         },
-"session_duration": raw.get("session_duration_seconds", 30),
+"session_duration": duration,
         "primary_metric":   pm,
         "dimensions":       valid_dims,
         "improvement_tips": raw.get("improvement_tips", [
@@ -459,8 +505,10 @@ async def get_skills():
     return [
         {
             "id":     skill_id,
+            "name":   meta["name"],
             "emoji":  meta["emoji"],
             "tag":    meta["tag"],
+            "domain": meta["domain"],
             "cached": skill_id in db
         }
         for skill_id, meta in STATIC_PROTOCOLS.items()
@@ -524,7 +572,7 @@ async def health():
         "cached":    list(db.keys()),
         "pending":   [s for s in STATIC_PROTOCOLS if s not in db]
     }
-
-
+    
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)  

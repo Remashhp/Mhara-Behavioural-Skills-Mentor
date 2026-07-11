@@ -1,76 +1,117 @@
 /**
  * SkillMentor - Unified Heuristic Scoring Engine
- * كل منطق التقييم هنا — session.js يستدعي فقط
+ * All heuristic scoring logic is implemented here — session.js only invokes it.
  */
+
+/**
+ * Algorithm calibration constants.
+ *
+ * IMPORTANT — provenance note:
+ * Clinical thresholds (perfect_min/max, BPM targets) come from the backend
+ * with per-number source tracking. The constants below are ENGINEERING
+ * calibration values (signal processing / UX pacing), chosen empirically
+ * during development — they are NOT clinical guidelines.
+ */
+const SCORING_CONFIG = {
+
+
+    // Frames collected to calibrate motion sensitivity before rhythm
+    // detection starts. 30 frames ≈ 1 second at typical webcam FPS.
+    CALIBRATION_FRAMES: 30,
+
+    // Motion threshold = average calibration delta × this factor.
+    // 0.5 filters camera noise while catching intentional movement.
+    MOTION_SENSITIVITY_FACTOR: 0.5,
+
+    // A compression interval must exceed (60000/bpmMax) × this factor
+    // to count — rejects double-triggers from a single compression.
+    MIN_INTERVAL_FACTOR: 0.6,
+
+    // Compressions averaged for the displayed BPM. 5 balances stability
+    // against responsiveness (~2.5s of data at target rate).
+    BPM_ROLLING_WINDOW: 5,
+
+    // Rolling window (frames) for compression-depth amplitude.
+    // ~60 frames ≈ 2-3 compressions at target rate — replaces a
+    // session-long max/min that froze depth evaluation.
+    // Moved from session.js: depth logic belongs to the scorer.
+    WRIST_WINDOW_FRAMES: 60
+};
+
 class HeuristicScorer {
 
     constructor() {
-        this.violationCounters = {};
         this.cprState = {
             lastDepthStatus: "up",
             compressionTimes: [],
             lastCompressionTimestamp: null,
             lastY: null,
             yHistory: [],
-            dynamicThreshold: null
+            dynamicThreshold: null,
+            wristYWindow: [],
+            compressionCount: 0
         };
     }
 
     // ─────────────────────────────────────────────────────────
-    // صفّر كل الذاكرة عند بداية جلسة جديدة
+    // Reset all internal state before starting a new session.
     // ─────────────────────────────────────────────────────────
     reset() {
-        this.violationCounters = {};
         this.cprState = {
             lastDepthStatus: "up",
             compressionTimes: [],
             lastCompressionTimestamp: null,
             lastY: null,
             yHistory: [],
-            dynamicThreshold: null
+            dynamicThreshold: null,
+            wristYWindow: [],
+            compressionCount: 0
         };
     }
-
     // ─────────────────────────────────────────────────────────
-    // ① التقييم العام — كل المهارات
-    // يقارن signalValue بـ perfect_min/max من Supabase
-    // ─────────────────────────────────────────────────────────
+    // ① Generic Evaluation — Applies to All Skills
+    // Compares the signal value against the perfect_min/max range from Supabase.
+    // ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     evaluateDimension(dimension, signalValue) {
         if (dimension.perfect_min === null || dimension.perfect_max === null) {
-            return { isValid: true, feedback: dimension.good_feedback, shouldPenalize: false };
+            return { isValid: true, feedback: dimension.good_feedback };
         }
 
         const isValid = signalValue >= dimension.perfect_min
             && signalValue <= dimension.perfect_max;
 
-        if (!isValid) {
-            const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-            if (!this.violationCounters[dimension.id]) {
-                this.violationCounters[dimension.id] = { lastPenalty: now };
-            }
-            const elapsed = now - this.violationCounters[dimension.id].lastPenalty;
-            const shouldPenalize = elapsed >= 500;
-            if (shouldPenalize) {
-                this.violationCounters[dimension.id].lastPenalty = now;
-            }
-            return { isValid: false, feedback: dimension.bad_feedback, shouldPenalize };
-        }
-
-        this.violationCounters[dimension.id] = null;
-        return { isValid: true, feedback: dimension.good_feedback, shouldPenalize: false };
+        return {
+            isValid,
+            feedback: isValid ? dimension.good_feedback : dimension.bad_feedback
+        };
     }
-
+    
     // ─────────────────────────────────────────────────────────
-    // ② CPR — دالة موحدة تتعامل مع كل معايير الإنعاش
+    // ② CPR Evaluation — Unified Logic for All CPR Criteria
+    // Owns the rolling wristY window and compression counter.
+    // session.js only passes the raw signal value.
     // ─────────────────────────────────────────────────────────
-    evaluateCpr(dimension, signalValue, wristYMax, wristYMin, bpmMin, bpmMax) {
 
-        // عمق الضغط — amplitude detection
+    evaluateCpr(dimension, signalValue, bpmMin, bpmMax) {
+
+        // Compression depth — Amplitude detection over rolling window
         if (dimension.pose_signal === "wrist_center_y") {
-            const amplitude = wristYMax - wristYMin;
+            this.cprState.wristYWindow.push(signalValue);
+            if (this.cprState.wristYWindow.length > SCORING_CONFIG.WRIST_WINDOW_FRAMES) {
+                this.cprState.wristYWindow.shift();
+            }
+
+            const win = this.cprState.wristYWindow;
+            const amplitude = Math.max(...win) - Math.min(...win);
             const threshold = dimension.perfect_max;
             const isValid = amplitude >= threshold;
+
             const rhythm = this._cprRhythm(signalValue, bpmMin, bpmMax);
+            if (rhythm) {
+                this.cprState.compressionCount++;
+                rhythm.count = this.cprState.compressionCount;
+            }
+
             return {
                 type: "depth_and_rhythm",
                 isValid,
@@ -79,27 +120,14 @@ class HeuristicScorer {
             };
         }
 
-        // إيقاع الضغط — state machine + تقييم الاستقامة
-        if (dimension.pose_signal === "wrist_center_y") {
-            const rhythm = this._cprRhythm(signalValue, bpmMin, bpmMax);
-            const spatial = this.evaluateDimension(dimension, signalValue);
-            return {
-                type: "rhythm",
-                rhythm,                      // BPM object أو null
-                isValid: spatial.isValid,
-                feedback: spatial.feedback
-            };
-        }
-
-        // باقي معايير CPR — wrist_center_x و arm_angle
+        // Remaining CPR criteria — wrist_center_x and arm_angle
         return {
             type: "spatial",
             ...this.evaluateDimension(dimension, signalValue)
         };
     }
-
     // ─────────────────────────────────────────────────────────
-    // State machine داخلية للـ CPR rhythm
+    // Internal state machine for CPR rhythm detection
     // ─────────────────────────────────────────────────────────
     _cprRhythm(wristY, bpmMin, bpmMax) {
         const now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
@@ -107,14 +135,14 @@ class HeuristicScorer {
             this.cprState.lastY = wristY;
             return null;
         }
-        if (this.cprState.yHistory.length < 30) {
+        if (this.cprState.yHistory.length < SCORING_CONFIG.CALIBRATION_FRAMES) {
             this.cprState.yHistory.push(Math.abs(wristY - this.cprState.lastY));
             this.cprState.lastY = wristY;
             return null;
         }
         if (!this.cprState.dynamicThreshold) {
-            const avgDelta = this.cprState.yHistory.reduce((a, b) => a + b, 0) / 30;
-            this.cprState.dynamicThreshold = Math.max(0.001, avgDelta * 0.5);
+            const avgDelta = this.cprState.yHistory.reduce((a, b) => a + b, 0) / SCORING_CONFIG.CALIBRATION_FRAMES;
+            this.cprState.dynamicThreshold = Math.max(0.001, avgDelta * SCORING_CONFIG.MOTION_SENSITIVITY_FACTOR);
         }
         const delta = wristY - this.cprState.lastY;
         this.cprState.lastY = wristY;
@@ -124,10 +152,10 @@ class HeuristicScorer {
             this.cprState.lastDepthStatus = "up";
             if (this.cprState.lastCompressionTimestamp !== null) {
                 const elapsed = now - this.cprState.lastCompressionTimestamp;
-                const dynamicMinTime = (60000 / bpmMax) * 0.6;
+                const dynamicMinTime = (60000 / bpmMax) * SCORING_CONFIG.MIN_INTERVAL_FACTOR;
                 if (elapsed > dynamicMinTime) {
                     this.cprState.compressionTimes.push(elapsed);
-                    if (this.cprState.compressionTimes.length > 5) {
+                    if (this.cprState.compressionTimes.length > SCORING_CONFIG.BPM_ROLLING_WINDOW) {
                         this.cprState.compressionTimes.shift();
                     }
                     const avg = this.cprState.compressionTimes.reduce((a, b) => a + b, 0)

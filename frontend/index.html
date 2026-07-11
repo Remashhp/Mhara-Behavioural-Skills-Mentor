@@ -371,21 +371,16 @@
   <div class="notif" id="notif"></div>
 
   <!-- ═══════════════════════════════════════════════════════════
-     SCRIPTS — load order matters
-     1. Data / scoring (no DOM dependency)
-     2. Session logic
-     3. Camera / pose
-     4. App controller (calls buildSkillGrid on load)
-     5. MediaPipe CDN libraries
+     1. Shared utilities (dependency-free)
+     2. Config / data / scoring (no DOM dependency)
+     3. Session logic
+     4. Camera / pose — MediaPipe Tasks Vision is dynamically
+        imported inside camera.js (no CDN script tags needed)
+     5. App controller (wires modules together on load)
      ═══════════════════════════════════════════════════════ -->
 
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"
-    crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"
-    crossorigin="anonymous"></script>
-
+  
+  <script src="js/utils.js"></script>
   <script src="js/config.js"></script>
   <script src="js/criteria-db.js"></script>
   <script src="js/score.js"></script>
