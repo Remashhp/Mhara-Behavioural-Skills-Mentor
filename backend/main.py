@@ -32,7 +32,8 @@ app.add_middleware(
     allow_origins=[
     "http://localhost:5500",      # VS Code Live Server
     "http://127.0.0.1:5500",      # localhost
-    "ttps://mhara-behavioural-skills-mentor.netlify.app"# Domain
+    "https://mhara-behavioural-skills-mentor.netlify.app" # Domain
+
 ],
     allow_credentials=True,
     allow_methods=["*"],
