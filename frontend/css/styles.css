@@ -189,6 +189,11 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);overflow-x:hid
 .criteria-tag{font-family:var(--fm);font-size:10px;color:var(--accent);
   background:var(--accent-dim);border:1px solid var(--border-bright);border-radius:6px;padding:3px 9px}
 .criteria-empty{font-family:var(--fm);font-size:11px;color:var(--text-dim)}
+
+
+
+
+
 .cta-btn{display:inline-flex;align-items:center;gap:10px;background:var(--accent);color:#fff;
   font-family:var(--fd);font-size:15px;font-weight:700;letter-spacing:0.02em;
   border:none;border-radius:var(--r);padding:16px 40px;cursor:pointer;
@@ -197,6 +202,8 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);overflow-x:hid
 .cta-btn.ready{opacity:1;pointer-events:all}
 .cta-btn.ready:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(59,130,246,0.38)}
 .cta-btn svg{width:18px;height:18px;fill:#fff}
+
+
 
 /* ── PRACTICE PAGE ────────────────────────────────────────── */
 #page-practice{padding:0;gap:0}
@@ -368,6 +375,38 @@ body{font-family:var(--fb);background:var(--bg);color:var(--text);overflow-x:hid
 .btn-home{background:transparent;color:var(--text-muted);font-family:var(--fb);font-size:14px;
   border:1px solid var(--border);border-radius:var(--r);padding:14px 28px;cursor:pointer;transition:border-color 0.2s,color 0.2s}
 .btn-home:hover{border-color:var(--border-bright);color:var(--text)}
+
+
+.survey-q {
+  margin-bottom: 20px;
+}
+.survey-q label {
+  display: block;
+  font-family: var(--fm);
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  /* RTL fix for Arabic question headings */
+  direction: rtl;
+  text-align: right;
+  letter-spacing: normal;
+}
+.survey-q select,
+.survey-q input,
+.survey-q textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: var(--fm);
+  font-size: 13px;
+  direction: rtl;
+  text-align: right;
+}
+
+
 
 /* ── UTILITY ──────────────────────────────────────────────── */
 .color-good{color:var(--good)}.color-warn{color:var(--warn)}.color-bad{color:var(--bad)}.color-neutral{color:var(--accent)}

@@ -367,7 +367,161 @@
     </div>
   </div>
 
+
+
+
+
+<!-- Consent Modal -->
+<div id="consentModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.85);">
+  <div dir="rtl" style="max-width:480px;margin:80px auto;background:var(--surface);border-radius:16px;padding:32px;text-align:right;">
+    
+    <div style="font-size:28px;text-align:center;margin-bottom:16px;">🔒</div>
+    <h2 style="font-family:var(--fh);font-size:18px;margin-bottom:12px;text-align:center;">إشعار الخصوصية</h2>
+    
+   <p style="
+  font-family:var(--fb);
+  font-size:14px;
+  color:var(--text-muted);
+  line-height:1.9;
+  margin-bottom:14px;
+  direction:rtl;
+  text-align:right;
+  letter-spacing:normal;
+">
+  أثناء جلسة التدريب، تستخدم المنصة الكاميرا لتحليل أدائك وتقديم التقييم الفوري.
+  <strong style="color:var(--text);font-weight:700;">
+    لا يتم تسجيل أو حفظ أو تخزين أي فيديو أو صورة لك أثناء تنفيذ المهارة.
+  </strong>
+</p>
+
+<div style="
+  font-family:var(--fb);
+  font-size:14px;
+  color:var(--text-muted);
+  line-height:1.9;
+  margin-bottom:14px;
+  direction:rtl;
+  text-align:right;
+  letter-spacing:normal;
+">
+  <strong style="display:block;color:var(--text);margin-bottom:6px;">
+    يتم الاحتفاظ فقط بـ:
+  </strong>
+
+  <div>• نتيجة الجلسة وأرقام التقييم والأداء.</div>
+  <div>• الملاحظات والتحسينات المقترحة من المنصة.</div>
+  <div>• إجابات الاستبيان في حال اخترت تعبئته.</div>
+</div>
+
+<p style="
+  font-family:var(--fb);
+  font-size:14px;
+  color:var(--text-muted);
+  line-height:1.9;
+  margin-bottom:24px;
+  direction:rtl;
+  text-align:right;
+  letter-spacing:normal;
+">
+  تُستخدم هذه البيانات
+  <strong style="color:var(--text);font-weight:700;">
+    لتحسين تجربة التدريب وتطوير المنصة فقط
+  </strong>
+  ولا يتم مشاركة أي تسجيلات أو صور، لأنها لا تُخزَّن من الأساس.
+</p>
+
+    <div style="display:flex;gap:12px;flex-direction:column;">
+      <button onclick="acceptConsent()" class="cta-btn ready"  style="width:100%;justify-content:center;text-align:center;direction:rtl;"">
+        ✓ أوافق على الشروط وأبدأ الجلسة
+      </button>
+      <button onclick="declineConsent()" style="width:100%;background:none;border:1px solid var(--border);border-radius:8px;padding:12px;color:var(--text-dim);cursor:pointer;font-family:var(--fm);font-size:13px;">
+        إلغاء والعودة للرئيسية
+      </button>
+    </div>
+
+  </div>
+</div>
+
+
+
   <!-- Notification Toast -->
+   <!-- Survey Modal -->
+    <div id="surveyModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.7);overflow-y:auto;">
+  <div dir="rtl" style="max-width:600px;margin:40px auto;background:var(--surface);border-radius:16px;padding:32px;direction:rtl;text-align:right;">
+    
+   <div style="position:relative;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
+
+  <h2 id="surveyTitle"
+      style="font-family:var(--fh);font-size:18px;margin:0;text-align:center;direction:rtl;letter-spacing:normal;">
+    استبيان تقييم المنصة
+  </h2>
+
+  <button
+    onclick="closeSurvey()"
+    style="position:absolute;left:0;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-dim);font-size:24px;cursor:pointer;">
+    ✕
+  </button>
+
+</div>
+    <p id="surveySkillLabel" style="font-family:var(--fm);font-size:12px;color:var(--text-dim);margin-bottom:24px;text-align:right;"></p>
+
+    <div class="survey-q">
+      <label>١. ما مدى سهولة استخدام المنصة؟</label>
+      <select id="sq1"><option value="">اختر</option><option value="ممتازة">ممتازة</option><option value="جيدة جدا">جيدة جداً</option><option value="جيدة">جيدة</option><option value="مقبولة">مقبولة</option><option value="ضعيفة">ضعيفة</option></select>
+    </div>
+
+    <div class="survey-q">
+      <label>٢. هل كانت التغذية الراجعة مفيدة؟</label>
+      <select id="sq2"><option value="">اختر</option><option value="مفيدة جدا">مفيدة جداً</option><option value="مفيدة">مفيدة</option><option value="إلى حد ما">إلى حد ما</option><option value="غير مفيدة">غير مفيدة</option></select>
+    </div>
+
+    <div class="survey-q">
+      <label>٣. ما مدى دقة تقييم الأداء للمهارة التي مارستها؟</label>
+      <select id="sq3"><option value="">اختر</option><option value="دقيقة جدا">دقيقة جداً</option><option value="دقيقة">دقيقة</option><option value="متوسطة">متوسطة</option><option value="غير دقيقة">غير دقيقة</option></select>
+    </div>
+
+    <div class="survey-q">
+      <label>٤. ما أبرز نقطة أعجبتك في المنصة؟</label>
+      <textarea id="sq6" rows="2" placeholder="اكتب هنا..."></textarea>
+    </div>
+
+    <div class="survey-q">
+      <label>٥. ما أبرز تحسين تقترحه؟</label>
+      <textarea id="sq7" rows="2" placeholder="اكتب هنا..."></textarea>
+    </div>
+
+    <div class="survey-q">
+      <label>٦. الاسم</label>
+      <input type="text" id="sq9" placeholder="اسمك الكريم">
+    </div>
+
+    <div class="survey-q">
+      <label>٧. التخصص / المسمى الوظيفي</label>
+      <input type="text" id="sq10" placeholder="تخصصك أو مسماك الوظيفي">
+    </div>
+
+    <div class="survey-q">
+      <label>٨. البريد الإلكتروني</label>
+      <input type="email" id="sq11" placeholder="example@email.com" style="direction:ltr;text-align:left;">
+    </div>
+
+    <div class="survey-q">
+      <label>٩. رقم التواصل</label>
+      <input type="tel" id="sq12" placeholder="05xxxxxxxx" style="direction:ltr;text-align:left;">
+    </div>
+
+    <div class="survey-q">
+      <label>١٠. هل تود المشاركة في تجارب مستقبلية؟</label>
+      <select id="sq13"><option value="">اختر</option><option value="نعم">نعم</option><option value="لا">لا</option></select>
+    </div>
+
+    <button onclick="submitSurvey()" class="cta-btn ready"  style="width:100%;justify-content:center;text-align:center;direction:rtl;">إرسال الاستبيان</button>
+    <button onclick="closeSurvey()" style="width:100%;margin-top:8px;background:none;border:none;color:var(--text-dim);cursor:pointer;font-family:var(--fm);font-size:12px;text-align:center;">تخطي</button>
+  </div>
+</div>
+
+</div> 
+
   <div class="notif" id="notif"></div>
 
   <!-- ═══════════════════════════════════════════════════════════

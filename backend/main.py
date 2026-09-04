@@ -33,6 +33,8 @@ app.add_middleware(
     "http://localhost:5500",      # VS Code Live Server
     "http://127.0.0.1:5500",      # localhost
     "https://mhara-behavioural-skills-mentor.netlify.app" # Domain
+    "http://localhost:5501",      # ← أضيفي
+    "http://127.0.0.1:5501",      # ← وهذا
 
 ],
     allow_credentials=True,
@@ -573,6 +575,15 @@ async def health():
         "cached":    list(db.keys()),
         "pending":   [s for s in STATIC_PROTOCOLS if s not in db]
     }
+    
+    
+@app.post("/api/survey")
+async def submit_survey(data: dict):
+    try:
+        supabase.table("survey_responses").insert([data]).execute()
+        return {"message": "تم حفظ الاستبيان"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
