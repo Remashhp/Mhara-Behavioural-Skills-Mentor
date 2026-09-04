@@ -97,6 +97,8 @@ function selectDomainSkill(skillId, el) {
 }
 
 /* ── Start Session ────────────────────────────────────────── */
+
+/*
 async function startPractice() {
   if (!SELECTED_SKILL) return;
 
@@ -105,6 +107,12 @@ async function startPractice() {
   showCamState('stateIdle');
 
   await sessionManager.startSession(SELECTED_SKILL);
+} */
+  
+
+async function startPractice() {
+  if (!SELECTED_SKILL) return;
+  document.getElementById('consentModal').style.display = 'block';
 }
 
 /* ── Stop Assessment Session ─────────────────────────────── */
@@ -275,6 +283,9 @@ function buildResults(skillData, finalScore, feedbackLog, savedScores) {
         <span class="tip-num">0${i + 1}</span>
         <span>${escapeHTML(t)}</span>
       </div>`).join('');
+
+        // Show survey after 2 seconds
+  setTimeout(() => showSurvey(skillData?.id, finalScore), 2000);
 }
 
 /* ── Retry Assessment Session ────────────────────────────── */
@@ -312,6 +323,78 @@ function notify(msg) {
   clearTimeout(notifTimer);
   notifTimer = setTimeout(() => el.classList.remove('show'), 3200);
 }
+
+
+
+/* ── Survey ──────────────────────────────────────────── */
+let _surveySkillId = null;
+let _surveyScore = null;
+
+function showSurvey(skillId, score) {
+  _surveySkillId = skillId;
+  _surveyScore = score;
+
+  const skillNames = {
+    'cpr': 'مهارة الإنعاش القلبي (CPR)',
+    'heimlich': 'مهارة التعامل مع الاختناق',
+    'hand_hygiene': 'مهارة تعقيم اليدين',
+    'safe_lifting': 'مهارة الرفع الآمن'
+  };
+
+  const label = document.getElementById('surveySkillLabel');
+  if (label) label.textContent = `المهارة المُقيَّمة: ${skillNames[skillId] || skillId}`;
+
+  document.getElementById('surveyModal').style.display = 'block';
+}
+
+function closeSurvey() {
+  document.getElementById('surveyModal').style.display = 'none';
+}
+
+async function submitSurvey() {
+  const data = {
+    skill_id: _surveySkillId,
+    final_score: _surveyScore,
+    q1_usability: document.getElementById('sq1').value,
+    q2_feedback_useful: document.getElementById('sq2').value,
+    q3_accuracy: document.getElementById('sq3').value,
+    q6_best_feature: document.getElementById('sq6').value,
+    q7_improvements: document.getElementById('sq7').value,
+    q9_name: document.getElementById('sq9').value,
+    q10_specialty: document.getElementById('sq10').value,
+    q11_email: document.getElementById('sq11').value,
+    q12_phone: document.getElementById('sq12').value,
+    q13_future_participation: document.getElementById('sq13').value,
+  };
+
+  try {
+    await fetch(`${CONFIG.API_BASE}/survey`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+  } catch (e) {
+    console.warn('Survey submit failed:', e);
+  }
+  closeSurvey();
+}
+
+
+
+function acceptConsent() {
+  document.getElementById('consentModal').style.display = 'none';
+  showPage('practice');
+  document.getElementById('session-status').textContent = 'Loading...';
+  showCamState('stateIdle');
+  sessionManager.startSession(SELECTED_SKILL);
+}
+
+function declineConsent() {
+  document.getElementById('consentModal').style.display = 'none';
+  SELECTED_SKILL = null;
+  goHome();
+}
+
 
 /* ── SESSION UI RENDERING ─────────────────────────────────────
    All DOM updates for session events live HERE.
